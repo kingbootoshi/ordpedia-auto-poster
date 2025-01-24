@@ -1,0 +1,28 @@
+{
+  "name": "ordpedia-auto-poster",
+  "version": "1.0.0",
+  "description": "Posts tweets when new Ordpedia pages are created",
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.3.0",
+    "dotenv": "^16.3.1",
+    "node-fetch": "^3.3.2",
+    "oauth-1.0a": "^2.2.6",
+    "pino": "^9.6.0",
+    "ts-node": "^10.9.1",
+    "twitter-api-v2": "^1.15.0",
+    "typescript": "^4.9.5"
+  },
+  "devDependencies": {
+    "@flydotio/dockerfile": "^0.7.3",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

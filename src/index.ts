@@ -116,22 +116,14 @@ async function main() {
           const pageTitle = newPage.title
           const pageSlug = newPage.slug
 
-          // Post the first tweet
-          const firstTweetId = await postTweet(
+          // Post a single tweet with both the announcement and the link
+          await postTweet(
             `A new Ordpedia page was created! ${twitterHandle} has created a new page "${pageTitle}"
 
-View the page link down below 👇`
+https://www.ordpedia.com/page/${pageSlug}`
           )
 
-          console.log("First tweet id:", firstTweetId)
-
-          // Post the second tweet as a reply to the first tweet
-          await postTweet(
-            `https://www.ordpedia.com/page/${pageSlug}`,
-            firstTweetId
-          )
-
-          logger.info('Successfully posted tweet thread for new page:', pageTitle)
+          logger.info('Successfully posted tweet for new page:', pageTitle)
         } catch (err) {
           logger.error('Error handling new page insert:', err)
         }

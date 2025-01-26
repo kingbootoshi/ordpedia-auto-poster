@@ -118,9 +118,11 @@ async function main() {
 
           // Post a single tweet with both the announcement and the link
           await postTweet(
-            `A new Ordpedia page was created! ${twitterHandle} has created a new page "${pageTitle}"
+            `A new Ordpedia page was created! 📖
 
-https://www.ordpedia.com/page/${pageSlug}`
+${twitterHandle} has created a new page "${pageTitle}"
+
+Read it here 👉 https://www.ordpedia.com/page/${pageSlug}`
           )
 
           logger.info('Successfully posted tweet for new page:', pageTitle)

@@ -2,6 +2,13 @@
 
 A FastAPI-based memory service for storing and retrieving Bitcoin ecosystem information using vector embeddings and semantic search capabilities.
 
+To start
+```
+uvicorn main:app --reload
+```
+
+Server will be available at http://127.0.0.1:8000
+
 ## Overview
 
 This API service provides a streamlined interface for managing Ordpedia's memory system, focusing on three core operations:

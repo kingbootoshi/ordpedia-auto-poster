@@ -311,4 +311,4 @@ async def startup_event():
     """Log startup information"""
     logger.info(f"Starting Ordpedia Memory API service - PID: {os.getpid()}")
     logger.info(f"Qdrant URL: {os.getenv('QDRANT_URL')}")
-    logger.info("Configuration loaded successfully")
+    logger.info("Configuration loaded successfully") 

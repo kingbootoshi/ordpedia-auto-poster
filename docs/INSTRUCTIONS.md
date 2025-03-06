@@ -81,6 +81,26 @@ npm run dev
 bun run src/index.ts
 ```
 
+### Utility Scripts
+
+**Sync Audit Tool**:
+Checks the sync status of all pages and generates a detailed report:
+```bash
+npm run audit
+# or
+bun run auditSync.ts
+```
+
+**GitHub Sync Only**:
+```bash
+bun run src/initialSync.ts
+```
+
+**Memory Sync Only**:
+```bash
+bun run src/initialMemorySync.ts
+```
+
 ## Key Operations
 
 ### Initial Sync

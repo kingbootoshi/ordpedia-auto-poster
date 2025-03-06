@@ -5,6 +5,9 @@
 - Python API only: `uvicorn main:app --reload`
 - Run both servers together: `npm run start:all` or `./start.sh`
 - Memory tools: `python memory_tools/addMemory.py`, `python memory_tools/searchMemory.py`
+- Audit sync status: `npm run audit` or `bun run auditSync.ts`
+- GitHub sync only: `bun run src/initialSync.ts`
+- Memory sync only: `bun run src/initialMemorySync.ts`
 
 ## Code Style Guidelines
 - TypeScript: Use strict typing, camelCase, async/await for promises
@@ -19,6 +22,8 @@
   3. Stores content in vector memory via Python API
 - Python FastAPI service provides vector memory storage and retrieval
 - Memory system extracts facts from Ordpedia pages for semantic search
+- Intelligent sync detection avoids redundant operations
+- Audit tools verify sync status across all systems
 
 ## Environment Configuration
 - Store all secrets in .env file (never commit to repo)

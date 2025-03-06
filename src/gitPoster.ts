@@ -17,6 +17,7 @@ const logger = pino({
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || ''
 const GITHUB_REPO_OWNER = process.env.GITHUB_REPO_OWNER || ''
 const GITHUB_REPO_NAME = process.env.GITHUB_REPO_NAME || ''
+const MEMORY_API_URL = process.env.MEMORY_API_URL || 'http://127.0.0.1:8000'
 
 // Interface for GitHub API content response
 interface GitHubContent {
@@ -24,6 +25,17 @@ interface GitHubContent {
   content?: string;
   type?: string;
   name?: string;
+}
+
+// Interface for Memory API response
+interface MemoryAPIResponse {
+  status: string;
+  result: {
+    results: Array<{
+      id: string;
+      memory: string;
+    }>;
+  };
 }
 
 /**
@@ -161,7 +173,6 @@ async function renameFolderInRepo(
       
       // fetch the file content
       const fileContentResp = await githubRequest<GitHubContent>('GET', `/contents/${filePath}`)
-      const sha = fileContentResp.sha
       const decodedContent = Buffer.from(fileContentResp.content || '', 'base64').toString('utf8')
       
       // create or update file in new folder
@@ -204,7 +215,7 @@ async function renameFolderInRepo(
 
 /**
  * Fetch the page, its slug, and the LATEST approved revision from DB
- * Return { slug, revisionNumber, content }
+ * Return { slug, title, revisionNumber, content }
  */
 async function fetchPageContent(
   supabase: SupabaseClient,
@@ -249,6 +260,40 @@ async function fetchPageContent(
 }
 
 /**
+ * Fetch all approved revisions for a page
+ * Returns array of {revisionNumber, content} objects sorted by revision number
+ */
+async function fetchAllApprovedRevisions(
+  supabase: SupabaseClient,
+  pageId: string
+): Promise<Array<{
+  revisionNumber: number
+  content: string
+}>> {
+  // Fetch all approved revisions for this page
+  const { data: revData, error: revErr } = await supabase
+    .from('page_revisions')
+    .select('content, revision_number')
+    .eq('page_id', pageId)
+    .eq('is_approved', true)
+    .order('revision_number', { ascending: true })
+
+  if (revErr) {
+    throw new Error(`Error fetching approved revisions for page ${pageId}: ${revErr.message}`)
+  }
+
+  if (!revData || revData.length === 0) {
+    logger.warn({ pageId }, 'No approved revisions found for page')
+    return []
+  }
+
+  return revData.map(rev => ({
+    revisionNumber: rev.revision_number,
+    content: rev.content
+  }))
+}
+
+/**
  * Handle uploading the newest approved revision of a page to GitHub.
  * Called when a page is newly approved or updated or on initial bulk upload.
  */
@@ -271,6 +316,20 @@ export async function handleNewOrUpdatedPage(
       `Add/Update page revision ${pageContent.revisionNumber} for page ${pageId}`
     )
     logger.info({ pageId, folderName, mdName }, 'Successfully handled new/updated page')
+
+    // Now sync the content to memory system if this page is newly approved
+    // We'll do a quick check: is the page is_approved?
+    const { data: pageData } = await supabase
+      .from('pages')
+      .select('is_approved')
+      .eq('id', pageId)
+      .single()
+
+    if (pageData && pageData.is_approved) {
+      logger.info({ pageId }, 'Page is approved. Syncing to memory service...')
+      await syncPageToMemory(supabase, pageId, pageContent.content)
+    }
+
   } catch (err) {
     const error = err as Error
     logger.error({
@@ -317,6 +376,11 @@ export async function handleNewlyApprovedRevision(
       `New approved revision ${revData.revision_number} for page ${pageId}`
     )
     logger.info({ revisionId, pageId, folderName, mdName }, 'Successfully handled newly approved revision')
+
+    // Also sync new revision content to memory
+    logger.info({ revisionId, pageId }, 'Syncing newly approved revision content to memory service...')
+    await syncPageToMemory(supabase, pageId, revData.content)
+    
   } catch (err) {
     const error = err as Error
     logger.error({
@@ -362,12 +426,45 @@ export async function renamePageFolderIfSlugChanged(
   }
 }
 
+// Utility to check if a file exists in GitHub
+async function fileExistsInRepo(filePath: string): Promise<boolean> {
+  try {
+    logger.debug({ filePath }, 'Checking if file exists in GitHub')
+    const getResp = await githubRequest<GitHubContent>('GET', `/contents/${filePath}`)
+    return !!getResp?.sha;
+  } catch (err) {
+    // 404 means file doesn't exist
+    if ((err as Error).message.includes('404')) {
+      return false;
+    }
+    // Other errors should be thrown
+    throw err;
+  }
+}
+
+// Utility to check if page memories exist in Supabase
+async function pageMemoriesExist(supabase: SupabaseClient, pageId: string): Promise<boolean> {
+  try {
+    const { count, error } = await supabase
+      .from('page_memories')
+      .select('*', { count: 'exact', head: true })
+      .eq('page_id', pageId);
+    
+    if (error) throw error;
+    return count !== null && count > 0;
+  } catch (err) {
+    logger.error({ pageId, error: (err as Error).message }, 'Error checking for existing memories');
+    return false; // Assume no memories exist if check fails
+  }
+}
+
 /**
- * Bulk upload all approved pages - run this once to backfill.
+ * Bulk upload all approved pages and their revisions - run this once to backfill.
+ * Only syncs pages that don't already exist in GitHub or don't have memories.
  */
 export async function uploadAllApprovedPages() {
   try {
-    logger.info('Starting bulk upload of all approved pages')
+    logger.info('Starting bulk upload of all approved pages and their revisions')
     const supabase = createClient(
       process.env.SUPABASE_URL as string,
       process.env.SUPABASE_SERVICE_ROLE as string
@@ -376,18 +473,117 @@ export async function uploadAllApprovedPages() {
     logger.debug('Fetching all approved pages from Supabase')
     const { data: pages, error: pagesErr } = await supabase
       .from('pages')
-      .select('id')
+      .select('id, slug, title')
       .eq('is_approved', true)
 
     if (pagesErr || !pages) {
       throw new Error(`Could not fetch approved pages: ${pagesErr?.message}`)
     }
 
-    logger.info({ pageCount: pages.length }, 'Found approved pages to upload')
+    logger.info({ pageCount: pages.length }, 'Found approved pages to check')
 
     for (const page of pages) {
       try {
-        await handleNewOrUpdatedPage(supabase, page.id)
+        // Get basic page info
+        const pageId = page.id
+        const slug = page.slug
+        const title = page.title
+        
+        // Check if latest revision file exists
+        const { data: latestRevision, error: revErr } = await supabase
+          .from('page_revisions')
+          .select('revision_number')
+          .eq('page_id', pageId)
+          .eq('is_approved', true)
+          .order('revision_number', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (revErr || !latestRevision) {
+          logger.warn({ pageId, slug, title }, 'No approved revisions found, skipping page');
+          continue;
+        }
+
+        // Check if file already exists in GitHub and memories exist in Supabase
+        const revisionFilePath = `${slug}/revision-${latestRevision.revision_number}.md`;
+        const [fileExists, memoriesExist] = await Promise.all([
+          fileExistsInRepo(revisionFilePath),
+          pageMemoriesExist(supabase, pageId)
+        ]);
+
+        if (fileExists && memoriesExist) {
+          logger.info({
+            pageId,
+            slug,
+            title,
+            revisionNumber: latestRevision.revision_number
+          }, 'Page already synced to GitHub and Memory, skipping');
+          continue;
+        }
+
+        logger.info({
+          pageId,
+          slug,
+          title,
+          needsGitHubSync: !fileExists,
+          needsMemorySync: !memoriesExist
+        }, 'Processing page for sync')
+        
+        // Fetch all approved revisions for this page if GitHub sync needed
+        const revisions = await fetchAllApprovedRevisions(supabase, pageId)
+        
+        if (revisions.length === 0) {
+          logger.warn({ pageId, slug }, 'No approved revisions found, skipping page')
+          continue
+        }
+        
+        logger.info(
+          { pageId, slug, revisionCount: revisions.length }, 
+          'Found approved revisions to upload'
+        )
+        
+        // Upload each revision to GitHub
+        for (const rev of revisions) {
+          try {
+            const mdName = `revision-${rev.revisionNumber}.md`
+            
+            logger.info(
+              { pageId, slug, revisionNumber: rev.revisionNumber }, 
+              'Creating/updating file in GitHub'
+            )
+            
+            await createOrUpdateFileInRepo(
+              `${slug}/${mdName}`,
+              rev.content,
+              `Sync revision ${rev.revisionNumber} for page ${title} (${pageId})`
+            )
+          } catch (err) {
+            // Log but continue with next revision
+            const error = err as Error
+            logger.error({
+              error: {
+                message: error.message,
+                stack: error.stack,
+                cause: error.cause
+              },
+              pageId,
+              slug,
+              revisionNumber: rev.revisionNumber
+            }, 'Failed to upload revision during bulk upload, continuing with next')
+          }
+        }
+        
+        // Only sync memory if needed
+        if (!memoriesExist) {
+          const latestRevision = revisions[revisions.length - 1]
+          if (latestRevision) {
+            logger.info({ pageId, slug }, 'Syncing latest revision to memory')
+            await syncPageToMemory(supabase, pageId, latestRevision.content)
+          }
+        } else {
+          logger.info({ pageId, slug }, 'Memories already exist, skipping memory sync')
+        }
+        
       } catch (err) {
         // Log but continue with next page
         const error = err as Error
@@ -401,7 +597,7 @@ export async function uploadAllApprovedPages() {
         }, 'Failed to handle page during bulk upload, continuing with next')
       }
     }
-    logger.info('Completed bulk upload of all approved pages')
+    logger.info('Completed bulk upload of all approved pages and their revisions')
   } catch (err) {
     const error = err as Error
     logger.error({
@@ -412,5 +608,58 @@ export async function uploadAllApprovedPages() {
       }
     }, 'Fatal error in uploadAllApprovedPages')
     throw err
+  }
+}
+
+/**
+ * Sync page content to the memory API. Replaces old memory, adds new memory, stores in "page_memories".
+ */
+export async function syncPageToMemory(supabase: SupabaseClient, pageId: string, pageContent: string) {
+  try {
+    // 1) Delete all existing memories for this page
+    const delResp = await fetch(`${MEMORY_API_URL}/delete_all`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_id: pageId })
+    })
+
+    if (!delResp.ok) {
+      const errText = await delResp.text()
+      throw new Error(`Failed to delete_all for pageId ${pageId}: ${errText}`)
+    }
+    logger.info({ pageId }, 'Deleted old memories successfully')
+
+    // 2) Add new memory with the entire page content
+    const addResp = await fetch(`${MEMORY_API_URL}/add`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: pageContent,
+        run_id: pageId
+      })
+    })
+
+    if (!addResp.ok) {
+      const errText = await addResp.text()
+      throw new Error(`Failed to add memory for pageId ${pageId}: ${errText}`)
+    }
+
+    const addResult = await addResp.json() as MemoryAPIResponse
+    logger.info({ pageId, addResult }, 'Successfully added new memory')
+
+    // 3) Store each memory record in page_memories
+    // Expected format: {status: "success", result: { results: [ {id: "...", memory: "..."}, ... ] }}
+    if (addResult?.result?.results) {
+      for (const mem of addResult.result.results) {
+        await supabase.from('page_memories').insert({
+          page_id: pageId,
+          memory_id: mem.id,
+          content: mem.memory
+        })
+      }
+      logger.info({ pageId }, 'Stored new memories in page_memories table')
+    }
+  } catch (error) {
+    logger.error({ error: (error as Error).message, pageId }, 'Error syncing page content to memory service')
   }
 }

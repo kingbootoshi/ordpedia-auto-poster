@@ -42,7 +42,7 @@ CREATE TABLE public.pages (
     search_vector tsvector GENERATED ALWAYS AS (
         setweight(to_tsvector('english', coalesce(title, '')), 'A')
     ) STORED,
-    labels TEXT[] DEFAULT '{}'  -- final/approved labels
+    labels TEXT[] DEFAULT '{}'
 );
 
 -- Now add the foreign key to page_revisions
@@ -118,7 +118,7 @@ BEGIN
         IF (TG_OP = 'UPDATE' AND OLD.is_approved = false AND NEW.is_approved = true) THEN
             user_id_to_update := NEW.created_by;
             points_to_add := 5; -- 5 points for approved page
-            
+
             -- Update or insert into user_scores
             INSERT INTO public.user_scores (user_id, score)
             VALUES (user_id_to_update, points_to_add)
@@ -133,7 +133,7 @@ BEGIN
         IF (TG_OP = 'UPDATE' AND OLD.is_approved = false AND NEW.is_approved = true) THEN
             user_id_to_update := NEW.created_by;
             points_to_add := 1; -- 1 point for approved revision
-            
+
             -- Update or insert into user_scores
             INSERT INTO public.user_scores (user_id, score)
             VALUES (user_id_to_update, points_to_add)
@@ -298,3 +298,14 @@ CREATE POLICY "Admins can delete page revisions"
             AND users.role = 'admin'
         )
     );
+
+------------------------------------------------------------------
+-- Added new table for storing memory references for each page
+------------------------------------------------------------------
+CREATE TABLE public.page_memories (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    page_id UUID NOT NULL REFERENCES public.pages(id) ON DELETE CASCADE,
+    memory_id UUID NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);

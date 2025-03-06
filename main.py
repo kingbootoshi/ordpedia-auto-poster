@@ -172,7 +172,7 @@ app.add_middleware(
 class AddRequest(BaseModel):
     """Request model for adding memories"""
     content: str  # The content to add to memory
-    run_id: str  # The run ID for this addition
+    run_id: str   # The run ID for this addition
 
 class SearchRequest(BaseModel):
     """Request model for searching memories"""
@@ -187,16 +187,22 @@ class DeleteAllRequest(BaseModel):
     """Request model for deleting all memories for a run"""
     run_id: str  # The run ID to delete all memories for
 
+class SearchFormattedRequest(BaseModel):
+    """Request model for the search_formatted endpoint"""
+    query: str
+    run_id: Optional[str] = None
+    limit: Optional[int] = None
+
 @app.post("/add")
 def add_memory(req: AddRequest):
-    """Add a new memory with the fixed Ordpedia agent ID"""
+    """Add a new memory with agent_id='ordpedia'"""
     try:
         logger.info(f"Adding memory for run_id: {req.run_id}")
         start_time = datetime.now()
         
         response = memory_instance.add(
             req.content,
-            agent_id="Ordpedia",  # Fixed agent ID
+            agent_id="ordpedia",
             run_id=req.run_id
         )
         
@@ -214,14 +220,14 @@ def add_memory(req: AddRequest):
 
 @app.post("/search")
 def search_memory(req: SearchRequest):
-    """Search memories with optional run_id filter"""
+    """Search memories with optional run_id filter using agent_id='ordpedia'"""
     try:
         logger.info(f"Searching memories | Query: '{req.query}' | Run ID: {req.run_id}")
         start_time = datetime.now()
 
         # Build search parameters
         search_params = {
-            "agent_id": "Ordpedia"  # Fixed agent ID
+            "agent_id": "ordpedia"
         }
         if req.run_id:
             search_params["run_id"] = req.run_id
@@ -242,7 +248,7 @@ def search_memory(req: SearchRequest):
 
 @app.post("/delete")
 def delete_memory(req: DeleteRequest):
-    """Delete a specific memory by ID"""
+    """Delete a specific memory by ID with agent_id='ordpedia'"""
     try:
         logger.info(f"Deleting memory ID: {req.memory_id}")
         start_time = datetime.now()
@@ -261,13 +267,13 @@ def delete_memory(req: DeleteRequest):
 
 @app.post("/delete_all")
 def delete_all_memories(req: DeleteAllRequest):
-    """Delete all memories for a specific run_id"""
+    """Delete all memories for a specific run_id with agent_id='ordpedia'"""
     try:
         logger.info(f"Deleting all memories for run_id: {req.run_id}")
         start_time = datetime.now()
         
         result = memory_instance.delete_all(
-            agent_id="Ordpedia",  # Fixed agent ID
+            agent_id="ordpedia",
             run_id=req.run_id
         )
         
@@ -280,6 +286,40 @@ def delete_all_memories(req: DeleteAllRequest):
         }
     except Exception as e:
         logger.error(f"Error in delete_all: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/search_formatted")
+def search_formatted(req: SearchFormattedRequest):
+    """
+    Search memories and return bullet-point results.
+    Default limit is 20 if not specified.
+    """
+    try:
+        logger.info(f"Formatted search | Query: '{req.query}' | Run ID: {req.run_id} | Limit: {req.limit}")
+        start_time = datetime.now()
+
+        search_params = {
+            "agent_id": "ordpedia"
+        }
+        if req.run_id:
+            search_params["run_id"] = req.run_id
+
+        limit = req.limit if req.limit else 20
+        results = memory_instance.search(req.query, limit=limit, **search_params)
+
+        bullet_points = "\n".join([f"- {item['memory']}" for item in results])
+
+        execution_time = (datetime.now() - start_time).total_seconds()
+        logger.info(f"Formatted search completed | Found: {len(results)} results | Time: {execution_time:.3f}s")
+
+        return {
+            "status": "success",
+            "results": results,
+            "bullet_points": bullet_points,
+            "execution_time_seconds": execution_time
+        }
+    except Exception as e:
+        logger.error(f"Error in search_formatted: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.middleware("http")
@@ -306,9 +346,14 @@ async def log_request_info(request, call_next):
 
     return response
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for server availability detection"""
+    return {"status": "ok", "service": "memory-api"}
+
 @app.on_event("startup")
 async def startup_event():
     """Log startup information"""
     logger.info(f"Starting Ordpedia Memory API service - PID: {os.getpid()}")
     logger.info(f"Qdrant URL: {os.getenv('QDRANT_URL')}")
-    logger.info("Configuration loaded successfully") 
+    logger.info("Configuration loaded successfully")

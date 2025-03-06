@@ -1,11 +1,26 @@
-general to do
-- make it so new pages that are approved are saved to public github
--> save all existing pages to github 
+# Ordpedia Auto Poster System - Todo List
 
-- set up a cloud memory equivalent ordpedia memory pipeline that takes entire pages, extracts facts from it, and becomes queryable
+## Completed Tasks
+- ✅ Make it so new pages that are approved are saved to public GitHub
+- ✅ Save all existing pages to GitHub
+- ✅ Set up a cloud memory pipeline that takes entire pages, extracts facts, and becomes queryable
+- ✅ Save memory IDs for each page in Supabase for tracking
+- ✅ Implement revision synchronization with proper GitHub folder structure
+- ✅ Delete old facts when a page gets revised, then re-run the pipeline
+- ✅ Unified startup process for both TypeScript and Python servers
+- ✅ Add redundancy checks to avoid unnecessary operations during initial sync
+- ✅ Add health check endpoint to memory service
 
-(is extracted facts reliable here, or chunking sentences into facts? do testing)
+## In Progress
+- 🔄 Evaluate fact extraction reliability (vs. chunking sentences into facts)
+- 🔄 Performance optimization for large-scale initial syncs
 
-- turn ordpedia server into an API that developers can hit which the cloud memory query will return the most relevant data
-
-- add revision updates later, but if a page gets revised, we should probably delete old facts then re-run the pipeline. which means that we need to save memory IDs for each page and then we can delete old facts by memory ID.
+## Todo
+- Turn Ordpedia server into a developer API that returns relevant data based on queries
+- Add more comprehensive memory search capabilities
+- Implement special pages about specific keywords/concepts
+- Add monitoring and alerting for sync failures
+- Build a dashboard for tracking system status
+- Deploy a service to analyze recent chats and add new pages automatically
+- Implement related words/topics feature using memory system
+- Add telemetry for monitoring system performance

@@ -4,7 +4,14 @@ import OAuth from 'oauth-1.0a'
 import crypto from 'crypto'
 import fetch from 'node-fetch'
 import pino from 'pino'
-import { handleNewOrUpdatedPage, handleNewlyApprovedRevision, renamePageFolderIfSlugChanged } from './gitPoster'
+import { 
+  handleNewOrUpdatedPage, 
+  handleNewlyApprovedRevision, 
+  renamePageFolderIfSlugChanged,
+  uploadAllApprovedPages 
+} from './gitPoster'
+import { ensureMemoryServer } from './server'
+import { bulkMemorySync } from './initialMemorySync'
 
 // Initialize logger
 const logger = pino({
@@ -83,11 +90,38 @@ async function postTweet(text: string, reply_to?: string): Promise<string> {
   }
 }
 
+
 async function main() {
+  // Ensure memory server is running
+  const memoryServerAvailable = await ensureMemoryServer();
+  if (!memoryServerAvailable) {
+    logger.warn('Memory server could not be started. Some features will be limited.');
+  } else {
+    logger.info('Memory server is running and available');
+  }
+
   const supabase = createClient(
     process.env.SUPABASE_URL as string,
     process.env.SUPABASE_SERVICE_ROLE as string
   )
+  
+  // Run initial sync on startup
+  try {
+    logger.info('Starting initial GitHub sync of all approved pages...');
+    await uploadAllApprovedPages();
+    logger.info('Initial GitHub sync completed successfully');
+    
+    // Only run memory sync if memory server is available
+    if (memoryServerAvailable) {
+      logger.info('Starting initial Memory sync of all approved pages...');
+      await bulkMemorySync();
+      logger.info('Initial Memory sync completed successfully');
+    } else {
+      logger.warn('Skipping Memory sync because memory server is not available');
+    }
+  } catch (error) {
+    logger.error({ error }, 'Error during initial sync, continuing with listener setup');
+  }
 
   // Listen for new inserts in the "pages" table -> tweet about new page
   // Then also handle GitHub updates if the page is already approved or becomes approved later.

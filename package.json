@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "start:all": "./start.sh",
+    "audit": "bun run auditSync.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.3.0",

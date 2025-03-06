@@ -27,7 +27,7 @@ config = {
 # Initialize memory
 m = Memory.from_config(config_dict=config)
 
-search_query = "tell me about the based angels"
+search_query = "tell me about bitcoin frogs"
 
 # Perform the get_all with metadata filter
 results = m.search(search_query, agent_id="test_agent")

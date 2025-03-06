@@ -11,12 +11,13 @@ Server will be available at http://127.0.0.1:8000
 
 ## Overview
 
-This API service provides a streamlined interface for managing Ordpedia's memory system, focusing on three core operations:
+This API service provides a streamlined interface for managing Ordpedia's memory system, focusing on core operations:
 - Adding new memories (documents/information)
 - Searching existing memories
-- Deleting memories (single or batch)
+- Deleting single or all memories for a given `run_id`
+- An additional search endpoint that returns bullet-point results
 
-The service uses Qdrant as the vector store backend and maintains a fixed agent ID "Ordpedia" for all operations.
+The service uses Qdrant as the vector store backend and maintains a fixed `agent_id="ordpedia"` for all operations.
 
 ## Configuration
 
@@ -31,22 +32,22 @@ QDRANT_API_KEY=your_qdrant_api_key
 ### System Configuration
 
 The system is configured with:
-- Collection name: "ordpedia"
-- Fixed agent ID: "Ordpedia"
+- Collection name: `ordpedia`
+- Fixed agent ID: `ordpedia`
 - Custom prompt for Bitcoin ecosystem information extraction
 
 ## API Endpoints
 
 ### 1. Add Memory
-Adds a new memory to the system.
+Adds a new memory to the system with `agent_id="ordpedia"`.
 
 ```http
 POST /add
 Content-Type: application/json
 
 {
-    "content": "string",  // The content to add to memory
-    "run_id": "string"   // Unique identifier for this batch/run
+    "content": "string",  // The content to add
+    "run_id": "string"    // Typically the page UUID
 }
 ```
 
@@ -54,7 +55,7 @@ Example:
 ```json
 {
     "content": "Based Angels is led by 13 (twitter.com/0x1x3x) with art by Spiralgaze (twitter.com/spiralgaze). The collection website is basedangels.net.",
-    "run_id": "batch_20240224"
+    "run_id": "9cd68c44-f361-4edf-8a5a-3d8cd488c603"
 }
 ```
 
@@ -63,24 +64,27 @@ Response:
 {
     "status": "success",
     "result": {
-        "memory_id": "uuid-string",
-        "content": "string",
-        // Additional memory metadata
+        "results": [
+            {
+                "id": "uuid-string",
+                "memory": "Based Angels is led by 13 (twitter.com/0x1x3x)..."
+            }
+        ]
     },
     "execution_time_seconds": 0.123
 }
 ```
 
 ### 2. Search Memories
-Search through stored memories using semantic search.
+Semantic search through stored memories.
 
 ```http
 POST /search
 Content-Type: application/json
 
 {
-    "query": "string",        // Search query
-    "run_id": "string"       // Optional: Filter by run_id
+    "query": "string",        
+    "run_id": "string"        // Optional: filter by run_id
 }
 ```
 
@@ -88,7 +92,7 @@ Example:
 ```json
 {
     "query": "tell me about Based Angels",
-    "run_id": "batch_20240224"  // Optional
+    "run_id": "9cd68c44-f361-4edf-8a5a-3d8cd488c603"
 }
 ```
 
@@ -98,10 +102,9 @@ Response:
     "status": "success",
     "results": [
         {
-            "memory_id": "uuid-string",
-            "content": "string",
-            "score": 0.95,
-            // Additional memory metadata
+            "id": "uuid-string",
+            "memory": "Based Angels is led by 13 (twitter.com/0x1x3x)...",
+            "score": 0.95
         }
     ],
     "execution_time_seconds": 0.123
@@ -109,21 +112,14 @@ Response:
 ```
 
 ### 3. Delete Memory
-Delete a specific memory by ID.
+Deletes a specific memory by ID.
 
 ```http
 POST /delete
 Content-Type: application/json
 
 {
-    "memory_id": "string"    // UUID of the memory to delete
-}
-```
-
-Example:
-```json
-{
-    "memory_id": "258b33c5-a41f-4c99-ae69-b2a31f273838"
+    "memory_id": "uuid-string"
 }
 ```
 
@@ -131,27 +127,29 @@ Response:
 ```json
 {
     "status": "success",
-    "result": true,
-    "execution_time_seconds": 0.123
+    "result": {
+        "message": "Memory deleted successfully!"
+    },
+    "execution_time_seconds": 0.456
 }
 ```
 
 ### 4. Delete All Memories
-Delete all memories for a specific run_id.
+Deletes all memories for a specific run_id.
 
 ```http
 POST /delete_all
 Content-Type: application/json
 
 {
-    "run_id": "string"      // Run ID to delete all memories for
+    "run_id": "uuid-string"
 }
 ```
 
 Example:
 ```json
 {
-    "run_id": "batch_20240224"
+    "run_id": "9cd68c44-f361-4edf-8a5a-3d8cd488c603"
 }
 ```
 
@@ -159,7 +157,48 @@ Response:
 ```json
 {
     "status": "success",
-    "result": true,
+    "result": {
+        "message": "All memories deleted successfully!"
+    },
+    "execution_time_seconds": 0.456
+}
+```
+
+### 5. Search Formatted
+Returns the top matching memories as bullet points. Default limit is 20.
+
+```http
+POST /search_formatted
+Content-Type: application/json
+
+{
+    "query": "string",
+    "run_id": "string",       // optional
+    "limit": 20              // optional, default 20
+}
+```
+
+Example:
+```json
+{
+    "query": "tell me about Based Angels",
+    "run_id": "9cd68c44-f361-4edf-8a5a-3d8cd488c603",
+    "limit": 5
+}
+```
+
+Response:
+```json
+{
+    "status": "success",
+    "results": [
+        {
+            "id": "uuid-string",
+            "memory": "Based Angels is led by 13...",
+            "score": 0.95
+        }
+    ],
+    "bullet_points": "- Based Angels is led by 13...\n- Another memory fact...",
     "execution_time_seconds": 0.123
 }
 ```
@@ -167,66 +206,37 @@ Response:
 ## Error Handling
 
 All endpoints return appropriate HTTP status codes:
-- 200: Successful operation
-- 400: Bad request (invalid input)
-- 500: Internal server error
+- **200**: Successful operation
+- **500**: Internal server error (with JSON error details)
 
-Error Response Format:
+Error response example:
 ```json
 {
-    "detail": "Error message description"
+  "detail": "Error message description"
 }
 ```
 
-## Logging
-
-The service includes comprehensive logging:
-- Request/response logging with unique request IDs
-- Execution time tracking
-- Error logging with stack traces
-- Log rotation with 10MB file size limit
-
-Log files are stored in the `logs` directory:
-- `api.log`: Main API operations log
-
 ## Running the Service
 
-1. Install dependencies:
+1. **Install dependencies**:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Set up environment variables:
+2. **Set environment variables**:
 ```bash
 export QDRANT_URL=your_qdrant_url
 export QDRANT_API_KEY=your_qdrant_api_key
 ```
 
-3. Run the service:
+3. **Run the service**:
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ## Best Practices
 
-1. **Run IDs**: Use meaningful run IDs that help identify batches of related memories based on the page UUID, this is so we can reference it for delete_all specifically
-
-2. **Content Format**: When adding memories, structure your content clearly. The system works best with well-formatted, factual information about the Bitcoin ecosystem.
-
-3. **Search Queries**: Make search queries specific and focused. The system uses semantic search, so natural language queries work well.
-
-4. **Memory Management**: Regularly clean up old or outdated memories using the delete_all endpoint with the appropriate run_id. Should be used when a new page revision is added.
-
-New page revision = wipe all memories for that run_id and add the new page revision again fully
-
-## Information Extraction
-
-The system uses a specialized prompt to extract and structure information about:
-- Protocol/Project Details
-- Individual/Team Information
-- Technical Information
-- Market/Economic Information
-- Community & Ecosystem
-- Historical Context
-
-Each fact is structured to start with the main subject name and includes embedded social links within relevant facts.
+1. **Use run_id = Page UUID**: For each Ordpedia page, use its unique ID as `run_id`. If a page gets revised, `delete_all` then re-add new content with the same `run_id`.
+2. **Content Format**: Provide well-structured, factual information about the Bitcoin ecosystem for best extraction results.
+3. **Semantic Queries**: Use natural language in queries for better semantic matches.
+4. **Memory Management**: Regularly remove outdated data with `delete_all` before adding new content if a page changes.

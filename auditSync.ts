@@ -97,7 +97,7 @@ async function auditSync() {
     logger.info('Fetching all pages from Supabase');
     const { data: pages, error: pagesErr } = await supabase
       .from('pages')
-      .select('id, title, slug, is_approved')
+      .select('id, title, slug, is_approved, last_memory_synced_revision_number')
       .order('created_at', { ascending: false });
 
     if (pagesErr || !pages) {
@@ -159,26 +159,35 @@ async function auditSync() {
         fileExistsInRepo(revisionFilePath),
         pageMemoriesExist(supabase, page.id)
       ]);
+      
+      // Check if memories are up-to-date with latest revision
+      const memoryUpToDate = page.last_memory_synced_revision_number === latestRevision.revision_number;
 
       // Log status
       logger.debug({
         pageId: page.id,
         slug: page.slug,
         hasGit,
-        hasMemory
+        hasMemory,
+        memoryUpToDate,
+        lastSyncedRevision: page.last_memory_synced_revision_number,
+        currentRevision: latestRevision.revision_number
       }, 'Page sync status');
 
       // Increment appropriate counter
-      if (hasGit && hasMemory) {
+      if (hasGit && hasMemory && memoryUpToDate) {
         fullySync++;
-      } else if (hasGit && !hasMemory) {
+      } else if (hasGit && (!hasMemory || !memoryUpToDate)) {
         gitOnlySync++;
         notSyncedPages.push({
           id: page.id,
           title: page.title,
           slug: page.slug,
           hasGit: true,
-          hasMemory: false
+          hasMemory: hasMemory,
+          memoryUpToDate: memoryUpToDate,
+          lastSyncedRevision: page.last_memory_synced_revision_number,
+          currentRevision: latestRevision.revision_number
         });
       } else if (!hasGit && hasMemory) {
         memoryOnlySync++;
@@ -187,7 +196,10 @@ async function auditSync() {
           title: page.title,
           slug: page.slug,
           hasGit: false,
-          hasMemory: true
+          hasMemory: true,
+          memoryUpToDate: memoryUpToDate,
+          lastSyncedRevision: page.last_memory_synced_revision_number,
+          currentRevision: latestRevision.revision_number
         });
       } else {
         notSynced++;
@@ -196,7 +208,10 @@ async function auditSync() {
           title: page.title,
           slug: page.slug,
           hasGit: false,
-          hasMemory: false
+          hasMemory: false,
+          memoryUpToDate: false,
+          lastSyncedRevision: page.last_memory_synced_revision_number,
+          currentRevision: latestRevision.revision_number
         });
       }
     }
@@ -231,18 +246,23 @@ async function auditSync() {
     console.log(`Total approved revisions: ${totalRevisions}`);
     console.log(`\nSync Status:`);
     console.log(`✅ Fully synced pages: ${fullySync} (${summary.percentageFullySynced}%)`);
-    console.log(`⚠️ GitHub only (no memory): ${gitOnlySync}`);
+    console.log(`⚠️ GitHub only / outdated memory: ${gitOnlySync}`);
     console.log(`⚠️ Memory only (no GitHub): ${memoryOnlySync}`);
     console.log(`❌ Not synced at all: ${notSynced}`);
     
     if (notSyncedPages.length > 0) {
       console.log('\nUNSYNCED PAGES:');
       notSyncedPages.forEach(page => {
-        const status = page.hasGit 
-          ? '🔵 Git only (missing memory)' 
-          : page.hasMemory 
-            ? '🟡 Memory only (missing git)' 
-            : '🔴 Not synced at all';
+        let status = '';
+        if (page.hasGit && !page.hasMemory) {
+          status = '🔵 Git only (missing memory)';
+        } else if (page.hasGit && page.hasMemory && !page.memoryUpToDate) {
+          status = '🟠 Git & outdated memory (rev: ' + page.lastSyncedRevision + ' → ' + page.currentRevision + ')';
+        } else if (!page.hasGit && page.hasMemory) {
+          status = '🟡 Memory only (missing git)';
+        } else {
+          status = '🔴 Not synced at all';
+        }
         console.log(`${status} | ${page.title} (${page.slug})`);
       });
     }

@@ -8,7 +8,8 @@
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
     "start:all": "./start.sh",
-    "audit": "bun run auditSync.ts"
+    "audit": "bun run auditSync.ts",
+    "init-tracking": "bun run src/initRevisionTracking.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.3.0",

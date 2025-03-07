@@ -17,4 +17,5 @@ qdrant_client
 rank_bm25
 redisvl
 sentence_transformers
+supabase>=2.0.0
 uvicorn

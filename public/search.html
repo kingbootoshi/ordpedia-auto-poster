@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ordpedia Memory Search</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        header {
+            background-color: #1a1a1a;
+            color: #f89500;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+        }
+        .search-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        input[type="text"], select {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #f89500;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #e58300;
+        }
+        .results {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .memory-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .memory-item:last-child {
+            border-bottom: none;
+        }
+        .memory-content {
+            font-size: 16px;
+        }
+        .highlight {
+            background-color: #fff3cd;
+            padding: 1px 4px;
+            border-radius: 3px;
+        }
+        .metadata {
+            color: #666;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: #666;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .filters > div {
+            flex: 1;
+        }
+        .stats {
+            text-align: right;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        @media (max-width: 768px) {
+            .filters {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Ordpedia Memory Search</h1>
+    </header>
+
+    <div class="search-container">
+        <input type="text" id="search-input" placeholder="Search for Bitcoin knowledge...">
+        
+        <div class="filters">
+            <div>
+                <label for="result-limit">Number of results:</label>
+                <select id="result-limit">
+                    <option value="5">5 results</option>
+                    <option value="10" selected>10 results</option>
+                    <option value="20">20 results</option>
+                    <option value="50">50 results</option>
+                    <option value="100">100 results</option>
+                </select>
+            </div>
+            <div>
+                <label for="page-filter">Filter by page (optional):</label>
+                <select id="page-filter">
+                    <option value="">All pages</option>
+                    <!-- Will be populated dynamically -->
+                </select>
+            </div>
+        </div>
+        
+        <button id="search-btn">Search</button>
+    </div>
+
+    <div id="error-container" class="error" style="display: none;"></div>
+
+    <div class="results">
+        <div class="stats" id="stats"></div>
+        <div id="results-container">
+            <p>Enter a search term above to find Bitcoin knowledge from Ordpedia.</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchBtn = document.getElementById('search-btn');
+            const searchInput = document.getElementById('search-input');
+            const resultsContainer = document.getElementById('results-container');
+            const resultLimit = document.getElementById('result-limit');
+            const pageFilter = document.getElementById('page-filter');
+            const errorContainer = document.getElementById('error-container');
+            const statsContainer = document.getElementById('stats');
+            
+            // Load available pages for the filter dropdown
+            fetchPages();
+            
+            // Handle search button click
+            searchBtn.addEventListener('click', performSearch);
+            
+            // Also search when Enter key is pressed
+            searchInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    performSearch();
+                }
+            });
+            
+            function performSearch() {
+                const query = searchInput.value.trim();
+                if (!query) {
+                    showError('Please enter a search term');
+                    return;
+                }
+                
+                hideError();
+                showLoading();
+                
+                const limit = parseInt(resultLimit.value);
+                const runId = pageFilter.value; // This will be the page ID if selected
+                
+                fetch('/api/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        run_id: runId || undefined,
+                        limit: limit
+                    })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Search request failed');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    displayResults(data, query);
+                })
+                .catch(error => {
+                    showError('Error performing search: ' + error.message);
+                    resultsContainer.innerHTML = '<p>Search failed. Please try again.</p>';
+                });
+            }
+            
+            function displayResults(data, query) {
+                // Get the actual results array from the nested structure
+                const results = data.results?.results || [];
+                
+                if (!results || results.length === 0) {
+                    resultsContainer.innerHTML = '<p>No results found for your search.</p>';
+                    statsContainer.textContent = 'No results';
+                    return;
+                }
+                
+                // Update stats
+                statsContainer.textContent = `${results.length} results (${data.execution_time_seconds.toFixed(2)}s)`;
+                
+                // Display results
+                let resultsHTML = '';
+                results.forEach(item => {
+                    // Highlight the search term in the memory content
+                    const highlightedContent = highlightText(item.memory, query);
+                    
+                    resultsHTML += `
+                        <div class="memory-item">
+                            <div class="memory-content">${highlightedContent}</div>
+                            <div class="metadata">
+                                Page ID: ${item.run_id}
+                                <br>
+                                Memory ID: ${item.id}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                resultsContainer.innerHTML = resultsHTML;
+            }
+            
+            function highlightText(text, query) {
+                // Simple highlighting - case insensitive
+                const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
+                return text.replace(regex, '<span class="highlight">$1</span>');
+            }
+            
+            function escapeRegExp(string) {
+                return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            }
+            
+            function showLoading() {
+                resultsContainer.innerHTML = '<div class="loading">Searching...</div>';
+                statsContainer.textContent = '';
+            }
+            
+            function showError(message) {
+                errorContainer.textContent = message;
+                errorContainer.style.display = 'block';
+            }
+            
+            function hideError() {
+                errorContainer.style.display = 'none';
+            }
+            
+            function fetchPages() {
+                // This function would normally fetch the list of pages from the database
+                // For now, we'll add a placeholder option
+                pageFilter.innerHTML = '<option value="">All pages</option>';
+                
+                // Fetch pages from our API endpoint
+                fetch('/api/pages')
+                    .then(response => {
+                        if (!response.ok) {
+                            console.error('Failed to fetch pages list');
+                            return;
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data && data.pages) {
+                            data.pages.forEach(page => {
+                                const option = document.createElement('option');
+                                option.value = page.id;
+                                option.textContent = page.title;
+                                pageFilter.appendChild(option);
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching pages:', error);
+                    });
+            }
+        });
+    </script>
+</body>
+</html>

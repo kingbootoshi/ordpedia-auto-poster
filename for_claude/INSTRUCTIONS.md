@@ -1,1 +1,1 @@
-open PROBLEMS.md and then open SOLUTIONS.md then implement the solutions as described.
+open for_claude/PROBLEMS.md and then open for_claude/SOLUTIONS.md then implement the solutions as described.

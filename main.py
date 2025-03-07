@@ -351,6 +351,46 @@ async def health_check():
     """Health check endpoint for server availability detection"""
     return {"status": "ok", "service": "memory-api"}
 
+@app.get("/pages")
+async def get_pages():
+    """Get a list of pages from Supabase for the search interface"""
+    try:
+        logger.info("Fetching page list for search interface")
+        
+        # Import Supabase at the module level
+        try:
+            from supabase import create_client, Client
+        except ImportError:
+            logger.error("Supabase Python client not installed. Run: pip install supabase")
+            return {"status": "error", "message": "Supabase client not installed"}
+        
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_SERVICE_ROLE")
+        
+        if not url or not key:
+            logger.error("Missing Supabase credentials in environment")
+            return {"status": "error", "message": "Missing database credentials"}
+        
+        supabase = create_client(url, key)
+        
+        # Fetch approved pages
+        response = supabase.table("pages") \
+            .select("id,title,slug") \
+            .eq("is_approved", True) \
+            .order("title", desc=False) \
+            .execute()
+        
+        if hasattr(response, 'data'):
+            logger.info(f"Successfully fetched {len(response.data)} pages")
+            return {"status": "success", "pages": response.data}
+        else:
+            logger.error("Unexpected response format from Supabase")
+            return {"status": "error", "message": "Unexpected database response format"}
+    
+    except Exception as e:
+        logger.error(f"Error fetching pages: {str(e)}", exc_info=True)
+        return {"status": "error", "message": f"Error fetching pages: {str(e)}"}
+
 @app.on_event("startup")
 async def startup_event():
     """Log startup information"""

@@ -321,13 +321,34 @@ export async function handleNewOrUpdatedPage(
     // We'll do a quick check: is the page is_approved?
     const { data: pageData } = await supabase
       .from('pages')
-      .select('is_approved')
+      .select('is_approved, last_memory_synced_revision_number')
       .eq('id', pageId)
       .single()
 
     if (pageData && pageData.is_approved) {
-      logger.info({ pageId }, 'Page is approved. Syncing to memory service...')
-      await syncPageToMemory(supabase, pageId, pageContent.content)
+      // Check if memories are already synced to this revision
+      if (pageData.last_memory_synced_revision_number === pageContent.revisionNumber) {
+        logger.info({ 
+          pageId, 
+          revisionNumber: pageContent.revisionNumber 
+        }, 'Memories already up-to-date with latest revision, skipping memory sync')
+      } else {
+        logger.info({ 
+          pageId,
+          currentRevision: pageContent.revisionNumber,
+          lastSyncedRevision: pageData.last_memory_synced_revision_number || 'none'
+        }, 'Page is approved. Syncing to memory service...')
+        
+        await syncPageToMemory(supabase, pageId, pageContent.content)
+        
+        // Update the memory sync revision tracker
+        await supabase
+          .from('pages')
+          .update({ last_memory_synced_revision_number: pageContent.revisionNumber })
+          .eq('id', pageId)
+          
+        logger.info({ pageId, revisionNumber: pageContent.revisionNumber }, 'Updated memory sync revision tracker')
+      }
     }
 
   } catch (err) {
@@ -376,10 +397,40 @@ export async function handleNewlyApprovedRevision(
       `New approved revision ${revData.revision_number} for page ${pageId}`
     )
     logger.info({ revisionId, pageId, folderName, mdName }, 'Successfully handled newly approved revision')
+    
+    // Update memory with this new revision content
+    const { data: pageData } = await supabase
+      .from('pages')
+      .select('is_approved, last_memory_synced_revision_number')
+      .eq('id', pageId)
+      .single()
+      
+    if (pageData && pageData.is_approved) {
+      // Check if memories are already synced to this revision
+      if (pageData.last_memory_synced_revision_number === revData.revision_number) {
+        logger.info({ 
+          pageId, 
+          revisionNumber: revData.revision_number 
+        }, 'Memories already up-to-date with latest revision, skipping memory sync')
+      } else {
+        logger.info({ 
+          pageId,
+          currentRevision: revData.revision_number,
+          lastSyncedRevision: pageData.last_memory_synced_revision_number || 'none'
+        }, 'Revision is approved. Syncing to memory service...')
+        
+        await syncPageToMemory(supabase, pageId, revData.content)
+        
+        // Update the memory sync revision tracker
+        await supabase
+          .from('pages')
+          .update({ last_memory_synced_revision_number: revData.revision_number })
+          .eq('id', pageId)
+          
+        logger.info({ pageId, revisionNumber: revData.revision_number }, 'Updated memory sync revision tracker')
+      }
+    }
 
-    // Also sync new revision content to memory
-    logger.info({ revisionId, pageId }, 'Syncing newly approved revision content to memory service...')
-    await syncPageToMemory(supabase, pageId, revData.content)
     
   } catch (err) {
     const error = err as Error
@@ -613,6 +664,8 @@ export async function uploadAllApprovedPages() {
 
 /**
  * Sync page content to the memory API. Replaces old memory, adds new memory, stores in "page_memories".
+ * Note: This function does not update the last_memory_synced_revision_number field;
+ * that's done by the caller to ensure revision tracking.
  */
 export async function syncPageToMemory(supabase: SupabaseClient, pageId: string, pageContent: string) {
   try {
@@ -650,16 +703,29 @@ export async function syncPageToMemory(supabase: SupabaseClient, pageId: string,
     // 3) Store each memory record in page_memories
     // Expected format: {status: "success", result: { results: [ {id: "...", memory: "..."}, ... ] }}
     if (addResult?.result?.results) {
-      for (const mem of addResult.result.results) {
-        await supabase.from('page_memories').insert({
-          page_id: pageId,
-          memory_id: mem.id,
-          content: mem.memory
-        })
+      // First delete any existing records to avoid duplicates
+      await supabase
+        .from('page_memories')
+        .delete()
+        .eq('page_id', pageId);
+        
+      // Then insert the new memory records
+      const memoryRecords = addResult.result.results.map(mem => ({
+        page_id: pageId,
+        memory_id: mem.id,
+        content: mem.memory
+      }));
+      
+      if (memoryRecords.length > 0) {
+        await supabase
+          .from('page_memories')
+          .insert(memoryRecords);
       }
-      logger.info({ pageId }, 'Stored new memories in page_memories table')
+      
+      logger.info({ pageId, memoryCount: memoryRecords.length }, 'Stored new memories in page_memories table')
     }
   } catch (error) {
     logger.error({ error: (error as Error).message, pageId }, 'Error syncing page content to memory service')
+    throw error; // Re-throw to allow proper handling by caller
   }
 }
